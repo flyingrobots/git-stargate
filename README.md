@@ -45,3 +45,44 @@ Branch protection only covers `refs/heads/*`. If your ledger lives under custom 
 [MIT](./LICENSE)
 _© James Ross • [flyingrobots](http://github.com/flyingrobots)_
 
+
+## Sequence: push path with stargate
+
+```mermaid
+sequenceDiagram
+    participant Dev as Dev workstation
+    participant SG as Stargate (bare repo)
+    participant GH as GitHub (mirror)
+
+    Dev->>SG: git push stargate refs/_blog/articles/<slug>
+    SG-->>SG: pre-receive: FF check + verify-commit
+    alt passes policy
+        SG-->>GH: post-receive mirror refs/_blog/* (or heads/_blog/*)
+        GH-->>Dev: mirror ack (non-blocking)
+        SG-->>Dev: push success
+    else fails policy
+        SG-->>Dev: reject push (non-FF or unsigned)
+    end
+```
+
+## Sequence: publish (fast-forward only)
+
+```mermaid
+sequenceDiagram
+    participant Dev as Dev
+    participant SG as Stargate
+    participant GH as GitHub
+
+    Dev->>Dev: update refs/_blog/published/<slug> (FF in local repo)
+    Dev->>SG: git push stargate refs/_blog/published/<slug>
+    SG-->>SG: pre-receive policy (FF + signed)
+    SG-->>GH: mirror published ref
+    GH-->>CI: build hook fetches published refs
+    CI-->>Site: rebuild static JSON (writing.json)
+```
+
+## Why this exists
+- Enforce FF-only and signed commits on non-branch namespaces (`refs/_blog/*`, `refs/kv/*`, etc.).
+- Provide a tiny gateway that mirrors accepted refs to GitHub while rejecting bad pushes early.
+- Keep custom ledgers (commit-message articles, KV, shiplog) safe from force pushes and unsigned writes.
+```
