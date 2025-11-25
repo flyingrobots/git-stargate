@@ -1,10 +1,11 @@
 # Git-Stargate
 
-> Forbidden git-fu harnessing a tiny wormhole to run pre/post-receive hooks on custom refs before mirroring to GitHub. Kiss my SaaS! 🌌🔧
+<img alt="stargate4" src="https://github.com/user-attachments/assets/a66517db-15ac-465f-8910-e882eacff418" align="right" width="500" />
 
 Git-Stargate is a lightweight gateway for Git refs that *aren't* normal branches (e.g., `refs/_blog/*`, `refs/kv/*`, `refs/_shiplog/*`). It enforces fast-forward-only updates, requires signed commits, and can mirror accepted updates to your main remote (GitHub, GitLab, etc.). Perfect for ledger-style content, git-native CMS, and append-only logs.
 
-## Features
+### Features
+
 - **FF-only**: Rejects non-fast-forward pushes on chosen namespaces.
 - **Signed-only**: Requires `git verify-commit` to pass for new tips.
 - **Mirroring**: Post-receive hook can push accepted refs to an upstream (optionally under `refs/heads/_mirror/...`).
@@ -41,4 +42,6 @@ Branch protection only covers `refs/heads/*`. If your ledger lives under custom 
 - Optional heads-mirroring switch.
 
 ## License
-MIT
+[MIT](./LICENSE)
+_© James Ross • [flyingrobots](http://github.com/flyingrobots)_
+
