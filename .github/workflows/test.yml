@@ -19,4 +19,5 @@ jobs:
       - name: Lint
         run: make lint
       - name: Test
+        if: ${{ !cancelled() }}
         run: make test

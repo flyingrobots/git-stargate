@@ -48,7 +48,10 @@ if [ "$show" = 1 ]; then
   exit 0
 fi
 
-[ -n "$dir" ] && [ -n "$message" ] || { usage >&2; exit 2; }
+if [ -z "$dir" ] || [ -z "$message" ]; then
+  usage >&2
+  exit 2
+fi
 
 entries=''
 for f in allowed_signers bindings admins; do
