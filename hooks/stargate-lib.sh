@@ -13,6 +13,12 @@
 #   stargate.mirrorHeads        true|false (default false)
 #   stargate.mirrorHeadsPrefix  default refs/heads/_mirror/
 
+# Policy must judge the objects actually stored. A pusher can create
+# refs/replace/<oid>, and Git would then read their object in place of <oid>,
+# for example a forged trust tree. Disable replacement for every Git command
+# the hooks run.
+export GIT_NO_REPLACE_OBJECTS=1
+
 SG_ZERO_OID=$(git hash-object --stdin </dev/null | sed 's/./0/g')
 
 sg_log() { printf 'stargate: %s\n' "$*" >&2; }

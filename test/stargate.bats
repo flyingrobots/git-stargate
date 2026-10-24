@@ -238,3 +238,26 @@ EOF
   [[ $output == *"mirroring refs/_blog/a to origin failed"* ]]
   grep -q ' refs/_blog/a ' "$GW/stargate/mirror-failures"
 }
+
+# --- review findings ------------------------------------------------------
+
+@test "a replacement object cannot substitute the trust state" {
+  make_trust "$BATS_TEST_TMPDIR/trust" alice alice <<<'refs/_blog/* *'
+  bootstrap --trust-dir "$BATS_TEST_TMPDIR/trust"
+  trust=$(git --git-dir="$GW" rev-parse refs/stargate/trust)
+
+  # A forged trust state that enrols mallory, pushed as a replacement for the
+  # real trust commit. refs/replace/* is outside every guarded namespace.
+  make_trust "$BATS_TEST_TMPDIR/forged" mallory "alice mallory" <<<'refs/_blog/* *'
+  entries=''
+  for f in allowed_signers bindings admins; do
+    entries+="100644 blob $(git -C "$WORK" hash-object -w "$BATS_TEST_TMPDIR/forged/$f")"$'\t'"$f"$'\n'
+  done
+  forged=$(git -C "$WORK" commit-tree -m forged "$(printf '%s' "$entries" | git -C "$WORK" mktree)")
+  git -C "$WORK" push --quiet stargate "$forged:refs/replace/$trust"
+
+  commit_as mallory "mallory after the replacement"
+  run push refs/_blog/a
+  refuted
+  [[ $output == *"not trusted"* ]]
+}
