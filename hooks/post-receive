@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Stargate post-receive: mirror accepted namespace and trust refs upstream.
+#
+# The push has already been accepted, so a mirror failure must not fail it.
+# Failures are reported to the pusher and appended to stargate/mirror-failures
+# in the gateway repository, so drift is visible instead of silent.
+set -euo pipefail
+
+# shellcheck source=hooks/stargate-lib.sh
+. "$(dirname "$0")/stargate-lib.sh"
+
+remote=$(sg_config mirrorRemote origin)
+git remote get-url "$remote" >/dev/null 2>&1 || exit 0
+
+prefix=$(sg_config mirrorHeadsPrefix refs/heads/_mirror/)
+trust_ref=$(sg_trust_ref)
+failures="$(git rev-parse --git-dir)/stargate/mirror-failures"
+
+while read -r old new ref; do
+  if [ "$ref" != "$trust_ref" ] && ! sg_in_namespace "$ref"; then
+    continue
+  fi
+  target=$ref
+  if sg_config_bool mirrorHeads false; then
+    # refs/_blog/a -> refs/heads/_mirror/_blog/a: the full ref name stays in
+    # the target, so a mirror can never land on a real branch such as main.
+    target="${prefix%/}/${ref#refs/}"
+  fi
+  if [ "$new" = "$SG_ZERO_OID" ]; then
+    spec=":$target"
+  else
+    spec="$new:$target"
+  fi
+  if ! git push --quiet "$remote" "$spec"; then
+    mkdir -p "$(dirname "$failures")"
+    printf '%s %s %s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$ref" "$new" "$remote" >>"$failures"
+    sg_log "warning: mirroring $ref to $remote failed; recorded in $failures"
+  fi
+done
+exit 0
