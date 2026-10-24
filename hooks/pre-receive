@@ -1,0 +1,199 @@
+#!/usr/bin/env bash
+# Stargate pre-receive: guard configured namespaces and the trust ref.
+#
+# Namespace refs: fast-forward only, no deletion unless allowed, and every
+# commit an update adds must carry a good signature. When the trust ref exists,
+# the signer must also be a principal its bindings permit for that ref.
+#
+# Trust ref: never created or deleted by push, fast-forward only, linear, each
+# commit signed by an admin of the trust state it replaces, and each resulting
+# trust tree well formed.
+set -euo pipefail
+
+# shellcheck source=hooks/stargate-lib.sh
+. "$(dirname "$0")/stargate-lib.sh"
+
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+
+failed=0
+reject() {
+  sg_log "reject $1: $2"
+  failed=1
+}
+
+# Print why $1 cannot be a guarded ref tip; print nothing if it is a commit.
+# A blob or tree has no history, so every history-based check would pass it
+# without examining anything.
+not_a_commit() {
+  local type
+  type=$(git cat-file -t "$1" 2>/dev/null) || type=missing
+  [ "$type" = commit ] || printf '%s is a %s, not a commit' "$1" "$type"
+}
+
+principal_listed() { # principal file
+  awk -v p="$1" '!/^[[:space:]]*(#|$)/ { n = split($1, a, ","); for (i = 1; i <= n; i++) if (a[i] == p) found = 1 } END { exit !found }' "$2"
+}
+
+# Succeed if principal $1 has at least one usable key in allowed_signers file
+# $2: an entry with no options whose key ssh-keygen can parse. A listed name
+# with corrupt key material, or options such as namespaces="file" that stop it
+# verifying Git signatures, would let an admin sign the update that locks every
+# admin out. Re-implementing ssh-keygen's option semantics here would be a
+# second, divergent verifier, so an admin entry simply may not carry options.
+admin_has_usable_key() {
+  local key
+  while IFS= read -r key; do
+    printf '%s\n' "$key" >"$TMP/keycheck.pub"
+    ssh-keygen -l -f "$TMP/keycheck.pub" >/dev/null 2>&1 && return 0
+  done < <(awk -v p="$1" '
+    /^[[:space:]]*(#|$)/ { next }
+    {
+      n = split($1, a, ","); hit = 0
+      for (i = 1; i <= n; i++) if (a[i] == p) hit = 1
+      if (!hit) next
+      if ($2 ~ /^(ssh-|ecdsa-sha2-|sk-)/ && NF >= 3) print $2 " " $3
+    }' "$2")
+  return 1
+}
+
+# Print why the trust tree in $1 is unusable; print nothing if it is fine.
+trust_problems() {
+  local dir=$1 admin count=0
+  # `|| [ -n ... ]` keeps a final line that has no trailing newline.
+  while read -r admin _ || [ -n "$admin" ]; do
+    case "$admin" in '' | '#'*) continue ;; esac
+    count=$((count + 1))
+    admin_has_usable_key "$admin" "$dir/allowed_signers" ||
+      printf 'admin %s has no usable key in allowed_signers\n' "$admin"
+  done <"$dir/admins"
+  [ "$count" -gt 0 ] || printf 'admins is empty, which would lock the trust ref\n'
+}
+
+check_trust_update() {
+  local ref=$1 old=$2 new=$3 commit parents parent rest status principal problems revs
+  if [ "$old" = "$SG_ZERO_OID" ]; then
+    reject "$ref" "the trust ref is initialised by the operator (bootstrap.sh --trust-dir), not by push"
+    return
+  fi
+  if [ "$new" = "$SG_ZERO_OID" ]; then
+    reject "$ref" "the trust ref cannot be deleted"
+    return
+  fi
+  problems=$(not_a_commit "$new")
+  if [ -n "$problems" ]; then
+    reject "$ref" "$problems"
+    return
+  fi
+  if ! git merge-base --is-ancestor "$old" "$new"; then
+    reject "$ref" "non-fast-forward ($old -> $new)"
+    return
+  fi
+  # Capture first: a failing command inside process substitution would only
+  # make the loop run zero times, and the update would pass unchecked.
+  if ! revs=$(git rev-list --reverse --parents "$old..$new") || [ -z "$revs" ]; then
+    reject "$ref" "could not list the commits this update adds"
+    return
+  fi
+  while read -r commit parents; do
+    read -r parent rest <<<"$parents"
+    if [ -z "${parent-}" ] || [ -n "${rest-}" ]; then
+      reject "$ref" "commit $commit is not a linear trust update"
+      return
+    fi
+    mkdir -p "$TMP/prev" "$TMP/next"
+    if ! sg_extract_trust "$parent" "$TMP/prev"; then
+      reject "$ref" "trust state $parent is incomplete"
+      return
+    fi
+    if ! sg_extract_trust "$commit" "$TMP/next"; then
+      reject "$ref" "commit $commit lacks allowed_signers, bindings or admins"
+      return
+    fi
+    status='' principal=''
+    read -r _ status principal < <(sg_signatures "$TMP/prev/allowed_signers" -1 "$commit") || true
+    if ! sg_ssh_signed "$commit"; then
+      reject "$ref" "commit $commit has no SSH signature; trust mode accepts only enrolled SSH keys"
+      return
+    fi
+    if [ "$status" != G ] || [ -z "${principal-}" ]; then
+      reject "$ref" "commit $commit is not signed by a key in the previous trust state"
+      return
+    fi
+    if ! principal_listed "$principal" "$TMP/prev/admins"; then
+      reject "$ref" "commit $commit is signed by $principal, who is not an admin"
+      return
+    fi
+    problems=$(trust_problems "$TMP/next")
+    if [ -n "$problems" ]; then
+      reject "$ref" "commit $commit: $problems"
+      return
+    fi
+  done <<<"$revs"
+}
+
+check_namespace_update() {
+  local ref=$1 old=$2 new=$3 trust signers='' commit status principal allowed range sigs problems
+  if [ "$new" = "$SG_ZERO_OID" ]; then
+    sg_config_bool allowDelete false ||
+      reject "$ref" "deletion is disabled (git config stargate.allowDelete true to permit it)"
+    return
+  fi
+  problems=$(not_a_commit "$new")
+  if [ -n "$problems" ]; then
+    reject "$ref" "$problems"
+    return
+  fi
+  if [ "$old" != "$SG_ZERO_OID" ] && ! git merge-base --is-ancestor "$old" "$new"; then
+    reject "$ref" "non-fast-forward ($old -> $new)"
+    return
+  fi
+  sg_config_bool requireSigned true || return 0
+
+  trust=$(git rev-parse --verify --quiet "$(sg_trust_ref)^{commit}" || true)
+  if [ -n "$trust" ]; then
+    mkdir -p "$TMP/current"
+    if ! sg_extract_trust "$trust" "$TMP/current"; then
+      reject "$ref" "trust ref $(sg_trust_ref) is incomplete"
+      return
+    fi
+    signers=$TMP/current/allowed_signers
+    if ! allowed=$(sg_allowed_principals "$ref" "$TMP/current/bindings"); then
+      reject "$ref" "no binding in $(sg_trust_ref) covers this ref"
+      return
+    fi
+  else
+    sg_log "warning: $(sg_trust_ref) is absent; accepting any signature the server trusts for $ref"
+  fi
+
+  range=$(sg_range "$old" "$new")
+  if ! sigs=$(sg_signatures "$signers" "$range") || [ -z "$sigs" ]; then
+    reject "$ref" "could not read the signatures of the commits this update adds"
+    return
+  fi
+  while read -r commit status principal; do
+    if [ -n "$trust" ] && ! sg_ssh_signed "$commit"; then
+      reject "$ref" "commit $commit has no SSH signature; trust mode accepts only enrolled SSH keys"
+      return
+    fi
+    if [ "$status" != G ]; then
+      reject "$ref" "commit $commit is unsigned or its signature is not trusted"
+      return
+    fi
+    if [ -n "$trust" ] && ! grep -qxF -e '*' -e "$principal" <<<"$allowed"; then
+      reject "$ref" "commit $commit is signed by ${principal:-an unknown principal}, who may not write this ref"
+      return
+    fi
+  done <<<"$sigs"
+}
+
+trust_ref=$(sg_trust_ref)
+while read -r old new ref; do
+  if [ "$ref" = "$trust_ref" ]; then
+    check_trust_update "$ref" "$old" "$new"
+  elif sg_in_namespace "$ref"; then
+    check_namespace_update "$ref" "$old" "$new"
+  fi
+done
+
+exit "$failed"

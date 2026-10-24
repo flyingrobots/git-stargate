@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# Stargate post-receive: mirror accepted namespace and trust refs upstream.
+#
+# The push has already been accepted, so a mirror failure must not fail it.
+# Failures are reported to the pusher and appended to stargate/mirror-failures
+# in the gateway repository, so drift is visible instead of silent.
+set -euo pipefail
+
+# shellcheck source=hooks/stargate-lib.sh
+. "$(dirname "$0")/stargate-lib.sh"
+
+remote=$(sg_config mirrorRemote origin)
+missing_remote=0
+if ! git remote get-url "$remote" >/dev/null 2>&1; then
+  # No remote at the default name means mirroring is off. A remote named in
+  # stargate.mirrorRemote that does not exist is a misconfiguration: report it
+  # and record every ref it skips, like any other mirror failure.
+  git config --get stargate.mirrorRemote >/dev/null || exit 0
+  missing_remote=1
+  sg_log "warning: mirror remote $remote is not configured; accepted refs are not mirrored"
+fi
+
+prefix=$(sg_config mirrorHeadsPrefix refs/heads/_mirror/)
+trust_ref=$(sg_trust_ref)
+failures="$(git rev-parse --git-dir)/stargate/mirror-failures"
+
+while read -r old new ref; do
+  if [ "$ref" != "$trust_ref" ] && ! sg_in_namespace "$ref"; then
+    continue
+  fi
+  target=$ref
+  if sg_config_bool mirrorHeads false; then
+    # refs/_blog/a -> refs/heads/_mirror/_blog/a: the full ref name stays in
+    # the target, so a mirror can never land on a real branch such as main.
+    target="${prefix%/}/${ref#refs/}"
+  fi
+  if [ "$new" = "$SG_ZERO_OID" ]; then
+    spec=":$target"
+  else
+    spec="$new:$target"
+  fi
+  if [ "$missing_remote" = 1 ] || ! git push --quiet "$remote" "$spec"; then
+    mkdir -p "$(dirname "$failures")"
+    printf '%s %s %s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$ref" "$new" "$remote" >>"$failures"
+    sg_log "warning: mirroring $ref to $remote failed; recorded in $failures"
+  fi
+done
+exit 0
