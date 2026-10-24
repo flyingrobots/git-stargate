@@ -10,7 +10,15 @@ set -euo pipefail
 . "$(dirname "$0")/stargate-lib.sh"
 
 remote=$(sg_config mirrorRemote origin)
-git remote get-url "$remote" >/dev/null 2>&1 || exit 0
+missing_remote=0
+if ! git remote get-url "$remote" >/dev/null 2>&1; then
+  # No remote at the default name means mirroring is off. A remote named in
+  # stargate.mirrorRemote that does not exist is a misconfiguration: report it
+  # and record every ref it skips, like any other mirror failure.
+  git config --get stargate.mirrorRemote >/dev/null || exit 0
+  missing_remote=1
+  sg_log "warning: mirror remote $remote is not configured; accepted refs are not mirrored"
+fi
 
 prefix=$(sg_config mirrorHeadsPrefix refs/heads/_mirror/)
 trust_ref=$(sg_trust_ref)
@@ -31,7 +39,7 @@ while read -r old new ref; do
   else
     spec="$new:$target"
   fi
-  if ! git push --quiet "$remote" "$spec"; then
+  if [ "$missing_remote" = 1 ] || ! git push --quiet "$remote" "$spec"; then
     mkdir -p "$(dirname "$failures")"
     printf '%s %s %s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$ref" "$new" "$remote" >>"$failures"
     sg_log "warning: mirroring $ref to $remote failed; recorded in $failures"

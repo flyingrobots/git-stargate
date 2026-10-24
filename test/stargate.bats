@@ -309,3 +309,22 @@ EOF
   refuted
   [[ $output == *"admin alice has no usable key in allowed_signers"* ]]
 }
+
+@test "a configured mirror remote that does not exist is reported" {
+  bootstrap --no-require-signed --mirror-remote upstream
+  commit_unsigned "post"
+
+  run push refs/_blog/a
+  [ "$status" -eq 0 ]
+  [[ $output == *"mirror remote upstream is not configured"* ]]
+  grep -q ' refs/_blog/a ' "$GW/stargate/mirror-failures"
+}
+
+@test "no mirror remote at all stays quiet: mirroring is simply off" {
+  bootstrap --no-require-signed
+  commit_unsigned "post"
+
+  run push refs/_blog/a
+  [ "$status" -eq 0 ]
+  [[ $output != *"mirror"* ]]
+}
