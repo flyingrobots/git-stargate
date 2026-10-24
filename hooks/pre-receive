@@ -57,7 +57,8 @@ admin_has_usable_key() {
 # Print why the trust tree in $1 is unusable; print nothing if it is fine.
 trust_problems() {
   local dir=$1 admin count=0
-  while read -r admin _; do
+  # `|| [ -n ... ]` keeps a final line that has no trailing newline.
+  while read -r admin _ || [ -n "$admin" ]; do
     case "$admin" in '' | '#'*) continue ;; esac
     count=$((count + 1))
     admin_has_usable_key "$admin" "$dir/allowed_signers" ||

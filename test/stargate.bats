@@ -341,3 +341,13 @@ EOF
   run push refs/_blog/a
   [ "$status" -eq 0 ]
 }
+
+@test "an admins file without a trailing newline still counts its last admin" {
+  make_trust "$BATS_TEST_TMPDIR/trust" alice alice <<<'refs/_blog/* *'
+  bootstrap --trust-dir "$BATS_TEST_TMPDIR/trust"
+  make_trust "$BATS_TEST_TMPDIR/next" alice "alice bob" <<<'refs/_blog/* *'
+  printf 'alice' >"$BATS_TEST_TMPDIR/next/admins"
+
+  run trust_update_as alice "$BATS_TEST_TMPDIR/next" "enrol bob; admins has no final newline"
+  [ "$status" -eq 0 ]
+}

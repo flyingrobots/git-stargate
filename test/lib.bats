@@ -47,3 +47,10 @@ refutes() {
   run sg_allowed_principals refs/kv/a "$BINDINGS"
   [ "$status" -eq 1 ]
 }
+
+@test "a bindings file without a trailing newline keeps its last binding" {
+  printf 'refs/_blog/* alice' >"$BINDINGS"
+  run sg_allowed_principals refs/_blog/a "$BINDINGS"
+  [ "$status" -eq 0 ]
+  [ "$output" = alice ]
+}

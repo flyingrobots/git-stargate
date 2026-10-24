@@ -77,7 +77,8 @@ sg_glob_to_regex() {
 # when no binding matches, so unbound refs fail closed.
 sg_allowed_principals() {
   local ref=$1 bindings=$2 pattern spec rest re p
-  while read -r pattern spec rest; do
+  # `|| [ -n ... ]` keeps a final line that has no trailing newline.
+  while read -r pattern spec rest || [ -n "$pattern" ]; do
     case "$pattern" in '' | '#'*) continue ;; esac
     re=$(sg_glob_to_regex "$pattern")
     if [[ $ref =~ $re ]]; then
