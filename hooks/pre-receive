@@ -89,6 +89,10 @@ check_trust_update() {
     fi
     status='' principal=''
     read -r _ status principal < <(sg_signatures "$TMP/prev/allowed_signers" -1 "$commit") || true
+    if ! sg_ssh_signed "$commit"; then
+      reject "$ref" "commit $commit has no SSH signature; trust mode accepts only enrolled SSH keys"
+      return
+    fi
     if [ "$status" != G ] || [ -z "${principal-}" ]; then
       reject "$ref" "commit $commit is not signed by a key in the previous trust state"
       return
@@ -145,6 +149,10 @@ check_namespace_update() {
     return
   fi
   while read -r commit status principal; do
+    if [ -n "$trust" ] && ! sg_ssh_signed "$commit"; then
+      reject "$ref" "commit $commit has no SSH signature; trust mode accepts only enrolled SSH keys"
+      return
+    fi
     if [ "$status" != G ]; then
       reject "$ref" "commit $commit is unsigned or its signature is not trusted"
       return

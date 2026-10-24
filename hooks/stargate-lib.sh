@@ -111,10 +111,19 @@ sg_signatures() {
   local signers=$1
   shift
   if [ -n "$signers" ]; then
-    git -c gpg.ssh.allowedSignersFile="$signers" log --format='%H %G? %GS' "$@"
+    # Trust mode: only keys in the trust ref count. Disable the OpenPGP and
+    # X.509 verifiers so the server's own keyrings cannot vouch for a signer.
+    git -c gpg.ssh.allowedSignersFile="$signers" -c gpg.program=false -c gpg.x509.program=false \
+      log --format='%H %G? %GS' "$@"
   else
     git log --format='%H %G? %GS' "$@"
   fi
+}
+
+# Succeed if commit $1 carries an SSH signature (gpgsig or gpgsig-sha256).
+sg_ssh_signed() {
+  git cat-file commit "$1" |
+    awk '/^$/ { exit 1 } /^gpgsig(-sha256)? / { exit !($2 == "-----BEGIN" && $3 == "SSH") }'
 }
 
 # Revision arguments for the commits an update adds to a ref's history.

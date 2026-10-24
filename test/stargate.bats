@@ -277,3 +277,24 @@ EOF
   refuted
   [[ $output == *"is a tree, not a commit"* ]]
 }
+
+@test "in trust mode a GPG signature cannot stand in for an enrolled SSH key" {
+  command -v gpg >/dev/null || skip "gpg is not installed"
+  # Short path: gpg-agent sockets fail under long temporary directories.
+  GNUPGHOME=$(mktemp -d /tmp/sg-gpg.XXXXXX)
+  export GNUPGHOME
+  gpg --batch --quiet --passphrase '' --quick-gen-key 'bob <bob@example.com>' ed25519 sign never
+  key=$(gpg --list-secret-keys --with-colons | awk -F: '/^fpr/ { print $10; exit }')
+
+  make_trust "$BATS_TEST_TMPDIR/trust" alice alice <<<'refs/_blog/* *'
+  bootstrap --trust-dir "$BATS_TEST_TMPDIR/trust"
+  # The gateway inherits GNUPGHOME, so its keyring trusts bob's OpenPGP key.
+  git -C "$WORK" -c gpg.format=openpgp -c "user.signingkey=$key" \
+    commit --quiet --allow-empty -S -m "bob signs with gpg"
+
+  run push refs/_blog/a
+  gpgconf --kill gpg-agent 2>/dev/null || true
+  rm -rf "$GNUPGHOME"
+  refuted
+  [[ $output == *"has no SSH signature"* ]]
+}
