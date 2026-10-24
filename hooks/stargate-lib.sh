@@ -122,8 +122,15 @@ sg_signatures() {
 
 # Succeed if commit $1 carries an SSH signature (gpgsig or gpgsig-sha256).
 sg_ssh_signed() {
+  # awk reads to the end of input on purpose. Exiting early would leave
+  # `git cat-file` writing to a closed pipe, and under pipefail its SIGPIPE
+  # would reject a large but validly signed commit.
   git cat-file commit "$1" |
-    awk '/^$/ { exit 1 } /^gpgsig(-sha256)? / { exit !($2 == "-----BEGIN" && $3 == "SSH") }'
+    awk '
+      done { next }
+      /^$/ { done = 1; next }
+      /^gpgsig(-sha256)? / { ssh = ($2 == "-----BEGIN" && $3 == "SSH"); done = 1 }
+      END { exit !ssh }'
 }
 
 # Revision arguments for the commits an update adds to a ref's history.

@@ -328,3 +328,16 @@ EOF
   [ "$status" -eq 0 ]
   [[ $output != *"mirror"* ]]
 }
+
+@test "a validly signed commit with a large message is accepted in trust mode" {
+  make_trust "$BATS_TEST_TMPDIR/trust" alice alice <<<'refs/_blog/* *'
+  bootstrap --trust-dir "$BATS_TEST_TMPDIR/trust"
+  # Larger than a pipe buffer, so a reader that stops early makes the writer
+  # take SIGPIPE.
+  head -c 1048576 /dev/zero | tr '\0' 'x' >"$BATS_TEST_TMPDIR/message"
+  # shellcheck disable=SC2046
+  git -C "$WORK" $(signing alice) commit --quiet --allow-empty -S -F "$BATS_TEST_TMPDIR/message"
+
+  run push refs/_blog/a
+  [ "$status" -eq 0 ]
+}

@@ -176,7 +176,7 @@ check_namespace_update() {
       reject "$ref" "commit $commit is unsigned or its signature is not trusted"
       return
     fi
-    if [ -n "$trust" ] && ! printf '%s\n' "$allowed" | grep -qxF -e '*' -e "$principal"; then
+    if [ -n "$trust" ] && ! grep -qxF -e '*' -e "$principal" <<<"$allowed"; then
       reject "$ref" "commit $commit is signed by ${principal:-an unknown principal}, who may not write this ref"
       return
     fi
