@@ -190,7 +190,7 @@ EOF
 
   run trust_update_as alice "$BATS_TEST_TMPDIR/next" "lock everyone out"
   refuted
-  [[ $output == *"admin carol has no key in allowed_signers"* ]]
+  [[ $output == *"admin carol has no usable key in allowed_signers"* ]]
 }
 
 @test "the trust ref cannot be created or deleted by push" {
@@ -297,4 +297,15 @@ EOF
   rm -rf "$GNUPGHOME"
   refuted
   [[ $output == *"has no SSH signature"* ]]
+}
+
+@test "a trust update whose only admin key is unparseable is rejected" {
+  make_trust "$BATS_TEST_TMPDIR/trust" alice alice <<<'refs/_blog/* *'
+  bootstrap --trust-dir "$BATS_TEST_TMPDIR/trust"
+  make_trust "$BATS_TEST_TMPDIR/next" alice "" <<<'refs/_blog/* *'
+  printf 'alice ssh-ed25519 INVALIDKEY\n' >"$BATS_TEST_TMPDIR/next/allowed_signers"
+
+  run trust_update_as alice "$BATS_TEST_TMPDIR/next" "corrupt alice's key"
+  refuted
+  [[ $output == *"admin alice has no usable key in allowed_signers"* ]]
 }

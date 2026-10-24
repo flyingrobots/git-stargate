@@ -35,14 +35,33 @@ principal_listed() { # principal file
   awk -v p="$1" '!/^[[:space:]]*(#|$)/ { n = split($1, a, ","); for (i = 1; i <= n; i++) if (a[i] == p) found = 1 } END { exit !found }' "$2"
 }
 
+# Succeed if principal $1 has at least one key in allowed_signers file $2 that
+# ssh-keygen can parse. A listed name with corrupt key material would let an
+# admin sign the update that locks every admin out.
+admin_has_usable_key() {
+  local key
+  while IFS= read -r key; do
+    printf '%s\n' "$key" >"$TMP/keycheck.pub"
+    ssh-keygen -l -f "$TMP/keycheck.pub" >/dev/null 2>&1 && return 0
+  done < <(awk -v p="$1" '
+    /^[[:space:]]*(#|$)/ { next }
+    {
+      n = split($1, a, ","); hit = 0
+      for (i = 1; i <= n; i++) if (a[i] == p) hit = 1
+      if (!hit) next
+      for (i = 2; i < NF; i++) if ($i ~ /^(ssh-|ecdsa-sha2-|sk-)/) { print $i " " $(i + 1); next }
+    }' "$2")
+  return 1
+}
+
 # Print why the trust tree in $1 is unusable; print nothing if it is fine.
 trust_problems() {
   local dir=$1 admin count=0
   while read -r admin _; do
     case "$admin" in '' | '#'*) continue ;; esac
     count=$((count + 1))
-    principal_listed "$admin" "$dir/allowed_signers" ||
-      printf 'admin %s has no key in allowed_signers\n' "$admin"
+    admin_has_usable_key "$admin" "$dir/allowed_signers" ||
+      printf 'admin %s has no usable key in allowed_signers\n' "$admin"
   done <"$dir/admins"
   [ "$count" -gt 0 ] || printf 'admins is empty, which would lock the trust ref\n'
 }
