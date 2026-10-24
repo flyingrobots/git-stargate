@@ -351,3 +351,15 @@ EOF
   run trust_update_as alice "$BATS_TEST_TMPDIR/next" "enrol bob; admins has no final newline"
   [ "$status" -eq 0 ]
 }
+
+@test "an admin key restricted by options cannot be the only usable admin key" {
+  make_trust "$BATS_TEST_TMPDIR/trust" alice alice <<<'refs/_blog/* *'
+  bootstrap --trust-dir "$BATS_TEST_TMPDIR/trust"
+  make_trust "$BATS_TEST_TMPDIR/next" alice "" <<<'refs/_blog/* *'
+  # A valid key, but namespaces="file" stops it verifying Git signatures.
+  printf 'alice namespaces="file" %s\n' "$(key_of alice)" >"$BATS_TEST_TMPDIR/next/allowed_signers"
+
+  run trust_update_as alice "$BATS_TEST_TMPDIR/next" "restrict alice's key"
+  refuted
+  [[ $output == *"admin alice has no usable key in allowed_signers"* ]]
+}

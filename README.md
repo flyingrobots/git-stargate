@@ -59,7 +59,8 @@ With that file, `refs/warp/g/writers/alice` accepts only commits signed by `alic
 Rules:
 
 - The operator creates the trust ref once with `bootstrap.sh --trust-dir DIR`. A push can never create or delete it, so the first pusher cannot claim the gateway.
-- Each later change must be a linear, fast-forward commit signed by an admin of the trust state it replaces. A change that would leave no admin with a key is refused.
+- Each later change must be a linear, fast-forward commit signed by an admin of the trust state it replaces. A change that would leave no admin with a usable key is refused.
+- A usable admin key is an `allowed_signers` entry with no options and a key `ssh-keygen` can parse. Options such as `namespaces=` can stop a key verifying Git signatures, so admin entries may not carry them; other principals' entries may.
 - Pushes to other refs are checked against the trust state the gateway already has. A push that enrols a key and uses it at once must be split into two pushes.
 - Without a trust ref, Stargate falls back to the server's own signing config (`gpg.ssh.allowedSignersFile` or GPG keyring) and accepts any signature it trusts, with a warning.
 
