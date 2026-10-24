@@ -77,7 +77,7 @@ Trust bindings currently assume SSH signatures (`gpg.format=ssh`), since princip
 ## Hooks
 
 - `pre-receive`: fast-forward only, deletion policy, signatures on every new commit, trust bindings, and trust-ref update rules.
-- `post-receive`: mirrors accepted namespace and trust refs upstream. Failures are printed to the pusher and appended to `stargate/mirror-failures` in the gateway repository; re-push the listed refs to recover.
+- `post-receive`: mirrors accepted namespace and trust refs upstream. With `--mirror-heads`, every mirrored ref, the trust ref included, keeps its full name under the prefix: `refs/stargate/trust` mirrors to `refs/heads/_mirror/stargate/trust`, next to the namespace refs it governs. Failures are printed to the pusher and appended to `stargate/mirror-failures` in the gateway repository; re-push the listed refs to recover.
 
 ## Why not GitHub branch protection?
 Branch protection only covers `refs/heads/*`. If your ledger lives under custom refs, Git-Stargate enforces policy before anything hits GitHub. When GitHub visibility is needed, mirror to `refs/heads/_mirror/...`. Treat the gateway as the source of truth: anyone with push access to GitHub can still rewrite the mirror there.
