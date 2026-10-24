@@ -9,21 +9,30 @@ setup() {
 
 matches() { [[ $2 =~ $(sg_glob_to_regex "$1") ]]; }
 
+# Bats ignores the status of a `!`-negated command unless it is the last one in
+# a test, so negative checks use this explicit failure instead.
+refutes() {
+  if matches "$1" "$2"; then
+    printf 'pattern %s unexpectedly matched %s\n' "$1" "$2" >&2
+    return 1
+  fi
+}
+
 @test "regex metacharacters in a pattern are literal" {
   matches 'refs/a.b/*' refs/a.b/c
-  ! matches 'refs/a.b/*' refs/aXb/c
+  refutes 'refs/a.b/*' refs/aXb/c
   matches 'refs/x+y/(z)' 'refs/x+y/(z)'
-  ! matches 'refs/x+y/(z)' refs/xxy/z
+  refutes 'refs/x+y/(z)' refs/xxy/z
 }
 
 @test "* spans path segments and {principal} spans exactly one" {
   matches 'refs/warp/*/writers/{principal}' refs/warp/g/sub/writers/alice
-  ! matches 'refs/warp/*/writers/{principal}' refs/warp/g/writers/alice/extra
+  refutes 'refs/warp/*/writers/{principal}' refs/warp/g/writers/alice/extra
 }
 
 @test "patterns are anchored at both ends" {
-  ! matches 'refs/_blog/*' refs/heads/refs/_blog/x
-  ! matches 'refs/kv/a' refs/kv/ab
+  refutes 'refs/_blog/*' refs/heads/refs/_blog/x
+  refutes 'refs/kv/a' refs/kv/ab
 }
 
 @test "the first matching binding wins and {principal} resolves to the captured segment" {
