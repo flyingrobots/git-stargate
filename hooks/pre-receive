@@ -22,6 +22,15 @@ reject() {
   failed=1
 }
 
+# Print why $1 cannot be a guarded ref tip; print nothing if it is a commit.
+# A blob or tree has no history, so every history-based check would pass it
+# without examining anything.
+not_a_commit() {
+  local type
+  type=$(git cat-file -t "$1" 2>/dev/null) || type=missing
+  [ "$type" = commit ] || printf '%s is a %s, not a commit' "$1" "$type"
+}
+
 principal_listed() { # principal file
   awk -v p="$1" '!/^[[:space:]]*(#|$)/ { n = split($1, a, ","); for (i = 1; i <= n; i++) if (a[i] == p) found = 1 } END { exit !found }' "$2"
 }
@@ -39,7 +48,7 @@ trust_problems() {
 }
 
 check_trust_update() {
-  local ref=$1 old=$2 new=$3 commit parents parent rest status principal problems
+  local ref=$1 old=$2 new=$3 commit parents parent rest status principal problems revs
   if [ "$old" = "$SG_ZERO_OID" ]; then
     reject "$ref" "the trust ref is initialised by the operator (bootstrap.sh --trust-dir), not by push"
     return
@@ -48,8 +57,19 @@ check_trust_update() {
     reject "$ref" "the trust ref cannot be deleted"
     return
   fi
+  problems=$(not_a_commit "$new")
+  if [ -n "$problems" ]; then
+    reject "$ref" "$problems"
+    return
+  fi
   if ! git merge-base --is-ancestor "$old" "$new"; then
     reject "$ref" "non-fast-forward ($old -> $new)"
+    return
+  fi
+  # Capture first: a failing command inside process substitution would only
+  # make the loop run zero times, and the update would pass unchecked.
+  if ! revs=$(git rev-list --reverse --parents "$old..$new") || [ -z "$revs" ]; then
+    reject "$ref" "could not list the commits this update adds"
     return
   fi
   while read -r commit parents; do
@@ -82,14 +102,19 @@ check_trust_update() {
       reject "$ref" "commit $commit: $problems"
       return
     fi
-  done < <(git rev-list --reverse --parents "$old..$new")
+  done <<<"$revs"
 }
 
 check_namespace_update() {
-  local ref=$1 old=$2 new=$3 trust signers='' commit status principal allowed range
+  local ref=$1 old=$2 new=$3 trust signers='' commit status principal allowed range sigs problems
   if [ "$new" = "$SG_ZERO_OID" ]; then
     sg_config_bool allowDelete false ||
       reject "$ref" "deletion is disabled (git config stargate.allowDelete true to permit it)"
+    return
+  fi
+  problems=$(not_a_commit "$new")
+  if [ -n "$problems" ]; then
+    reject "$ref" "$problems"
     return
   fi
   if [ "$old" != "$SG_ZERO_OID" ] && ! git merge-base --is-ancestor "$old" "$new"; then
@@ -115,6 +140,10 @@ check_namespace_update() {
   fi
 
   range=$(sg_range "$old" "$new")
+  if ! sigs=$(sg_signatures "$signers" "$range") || [ -z "$sigs" ]; then
+    reject "$ref" "could not read the signatures of the commits this update adds"
+    return
+  fi
   while read -r commit status principal; do
     if [ "$status" != G ]; then
       reject "$ref" "commit $commit is unsigned or its signature is not trusted"
@@ -124,7 +153,7 @@ check_namespace_update() {
       reject "$ref" "commit $commit is signed by ${principal:-an unknown principal}, who may not write this ref"
       return
     fi
-  done < <(sg_signatures "$signers" "$range")
+  done <<<"$sigs"
 }
 
 trust_ref=$(sg_trust_ref)

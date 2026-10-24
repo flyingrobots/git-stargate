@@ -261,3 +261,19 @@ EOF
   refuted
   [[ $output == *"not trusted"* ]]
 }
+
+@test "a guarded ref must point at a commit, signed or not" {
+  make_trust "$BATS_TEST_TMPDIR/trust" alice alice <<<'refs/_blog/* *'
+  bootstrap --trust-dir "$BATS_TEST_TMPDIR/trust"
+  blob=$(printf 'not a commit\n' | git -C "$WORK" hash-object -w --stdin)
+  tree=$(git -C "$WORK" mktree </dev/null)
+
+  run git -C "$WORK" push stargate "$blob:refs/_blog/blob"
+  refuted
+  [[ $output == *"is a blob, not a commit"* ]]
+
+  git --git-dir="$GW" config stargate.requireSigned false
+  run git -C "$WORK" push stargate "$tree:refs/_blog/tree"
+  refuted
+  [[ $output == *"is a tree, not a commit"* ]]
+}
